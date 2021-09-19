@@ -1,3 +1,6 @@
+from selenium.webdriver.common.keys import Keys
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 import streamlit as st
 import nltk
 import string
@@ -9,26 +12,23 @@ import re
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.linear_model import LogisticRegression
-from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
-from sklearn.metrics import confusion_matrix
-from sklearn.metrics import r2_score
-import warnings
-warnings.filterwarnings('always')
-warnings.filterwarnings('ignore')
+
+
 nltk.download('stopwords')
 
 st.title("Restaurant Recommender System")
 
 df = pd.read_csv(  # input dataset
-    'https://raw.githubusercontent.com/smcri/ML_dataset/main/all_items2.csv')
+    'all_items.csv')
 
 df_rest = pd.read_csv(
     'all_rest.csv')
-
+df_rest.columns = ['Name', 'Rating', 'Cuisine', 'Address', 'No. of Ratings']
 df.drop_duplicates(inplace=True)  # remove any duplicates
+
+# for i in range(df.shape[0]):
+#     if(df.iloc[i, [1]][0] == "Aloo Cheese Roll"):
+#         st.write(i)
 # preprocessing step for calculating similarity
 df['Description'] = df['Description'].str.lower()
 df['Description'] = df['Description'].apply(  # removing punctuation with empty string
@@ -38,119 +38,192 @@ STOPWORDS = set(stopwords.words('english'))  # loading stopwords of english
 df['Description'] = df['Description'].apply(lambda text: " ".join(  # remving stopwords from description
     [word for word in str(text).split() if word not in STOPWORDS]))
 
-# st.write(df)
 
-# item_names = list(zip(df['Item Name'], df['Restaurant Index']))
-# st.write(item_names)
-# print(list(df_rest.iloc[:, 0]))
-select_restaurant = st.selectbox(
-    "Enter the name of restaurant from dropdown",
-    list(df_rest.iloc[:, 0])
-)
+def index_dish():
+    select_restaurant = st.selectbox(
+        "Choose Restaurant",
+        list(df_rest.iloc[:, 0])
+    )
+    selected_rest_index = df_rest[df_rest['Name']
+                                  == select_restaurant].index[0]+1
+    # st.write(selected_rest_index)
+    item_names = []
 
-item_names = []
-
-
-for i in range(df.shape[0]):
-    item_names.append(df['Item Name'][i] + str(df['Restaurant Index']))
-# print(df_rest.iloc[:, 0][0])
-select_dish = st.selectbox(
-    "Enter the name of resturant from dropdown",
-    item_names
-)
-df_percent = df
-df_percent.set_index('Item Name', inplace=True)  # setting Item name as index
-# string all Item name into series indices
-indices = pd.Series(df_percent.index)
+    for i in range(df.shape[0]):
+        if(df['Restaurant Index'][i] == selected_rest_index):
+            item_names.append(df['Item Name'][i])
+    select_dish = st.selectbox(
+        "Choose the corresponding dishes",
+        item_names
+    )
+    return df[df['Item Name'] == select_dish].index[0]
 
 
 tfidf = TfidfVectorizer(analyzer='word', ngram_range=(
     1, 2), min_df=0, stop_words='english')
-tfidf_matrix = tfidf.fit_transform(df_percent['Description'])
+# vectorise the description and calculate tfidf values
+tfidf_matrix = tfidf.fit_transform(df['Description'])
 
+# calculte correlation matrix of cosine similarity on the basis of tf idf
 cosine_similarities = linear_kernel(tfidf_matrix, tfidf_matrix)
 
-name = 'Butter Naan'
+rdishes = list()               # recommended dishes list
 
-rdishes = list()               # recommended dishses list
+idx = index_dish()  # getting index number of row
 
-# retriving indiex of recommended item
-idx = indices[indices == name].index[0]
-# st.write(idx)
+
 score_series = pd.Series(cosine_similarities[idx]).sort_values(
-    ascending=False)  # retriving values with maximum cosine similarity
+    ascending=False)  # retriving values with maximum cosine similarity on the basis of index
 
-# string indices of top 10 dishes
+# indices of top 30  dishes
 # first position will be for dishes itself
 top10 = list(score_series.iloc[1:31].index)
 
-for each in top10:  # retriving the name of top10 dishes
-    # if(rdishes.count(list(df_percent.index)[each]) <= 2):
-    # if list(df_percent.index)[each] not in rdishes:
-    rdishes.append(list(df_percent.index)[each])
+# print(top10)
+ntop10 = []
 
+for each in top10:
+    if(each != idx):
+        # appending tuple of (item name,restaurant index) to rdishes
+        if (df.iloc[each, [1]][0], df.iloc[each, [6]][0]) not in rdishes:
+            rdishes.append((df.iloc[each, [1]][0], df.iloc[each, [6]][0]))
+            ntop10.append(each)
 
-# retring veg/nonveg of recommended list
-rveg = df_percent['Veg/Non-veg'][df_percent.index == name]
-rveg = rveg[0]
-# retriving category of recommended list
-rcat = df_percent['Category'][df_percent.index == name]
-rcat = rcat[0]
-rprice = df_percent['Price'][df_percent.index == name]
-rprice = rprice[0]
+# st.write(ntop10)
+# retrieving veg/nonveg of recommended list
+rveg = df.iloc[idx, [4]][0]
+
+# retrieving category of recommended list
+rcat = df.iloc[idx, [0]][0]
+rprice = df.iloc[idx, [2]][0]
 score = list()
-for dish in rdishes:
+for nindex in ntop10:
     # retriving veg/nonveg of dish
-    veg = df_percent['Veg/Non-veg'][df_percent.index == dish]
-    veg = veg[0]
+    veg = df.iloc[nindex, [4]][0]
     # retriving category of dish
-    cat = df_percent['Category'][df_percent.index == dish]
-    cat = cat[0]
+    cat = df.iloc[nindex, [0]][0]
     tempscore = 0
     if(veg == rveg):                                           # adding 3 if veg/nonveg matches
         tempscore = tempscore + 3
     if(rcat == cat):
         # adding 1 if category matches
         tempscore = tempscore + 1
-    temprating = df_percent['Rating'][df_percent.index == dish]
-    tempprice = df_percent['Price'][df_percent.index == dish]
-    # sorting temprice acc to temprating in reverse manner
-    tempsort = [x for _, x in sorted(zip(temprating, tempprice), reverse=True)]
-    tempsort2 = sorted(df_percent['Rating']                        # retriving rating in reverse sorted manner
-                       [df_percent.index == dish], reverse=True)
-    tempscore = tempscore + 1.2*(tempsort2[0]/5)
-    normprice = (tempsort[0]/830)
+    temprating = df.iloc[nindex, [5]][0]
+    tempprice = df.iloc[nindex, [2]][0]
+
+    # assigning score on the basis of rating
+    tempscore = tempscore + 1.2*(temprating/5)
+    normprice = (tempprice/830)
+    # penalise on the basis of price
     tempscore = tempscore - 1.05*abs(normprice-rprice)/rprice
-# print(df_percent['Price'][df_percent.index == dish])
+
     score.append(tempscore)
 
 # sorting on the basis of score
 rdishes = [x for _, x in sorted(zip(score, rdishes), reverse=True)]
-newridshes = []
-for dish in rdishes:
-    if(newridshes.count(dish) <= 2):
-        newridshes.append(dish)
-rdishes = newridshes[0:10]
-print(rdishes)
-rindex = []
+# sorting dish indices on the basis of score
+ntop10 = [x for _, x in sorted(zip(score, ntop10), reverse=True)]
 
+dishname = []
+
+newname = []
+newridshes = []
+newntop10 = []
+
+
+# loop to retrieve dishname
 for dish in rdishes:
-    rindex.append(int(df_percent['Restaurant Index']
-                      [df_percent.index == dish][0]))
+    dishname.append(dish[0])
+
+i = 0
+
+# loop to append dishes if frequency is 3
+for name in dishname:
+    if(newname.count(name) <= 2):
+        newname.append(name)
+        newridshes.append(rdishes[i])
+        newntop10.append(ntop10[i])
+    i = i+1
+
+
+rdishes = newridshes[0:10]  # taking top 10 dishes
+ntop10 = newntop10[0:10]
+# st.write(rdishes)
+rindex = []  # list for restaurant index
+
+for dish in rdishes:  # appending restaurant index of dish
+    rindex.append(dish[1])
 
 print(rindex)
 
-rrest = []
+
+def show_image(searchtext):
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+    driver = webdriver.Chrome(
+        'D:\\Downloads\\chromedriver_win32\\chromedriver.exe', chrome_options=options)
+    driver.get("https://www.google.com/imghp?hl=en")
+
+    query_in = driver.find_element_by_xpath('//*[@id="sbtc"]/div/div[2]/input')
+    query_in.send_keys(searchtext)
+    query_in.send_keys(Keys.ENTER)
+
+    # image_tag = driver.find_element_by_xpath('//*[@id="hdtb-msb"]/div[1]/div/div[2]/a')
+    # image_tag.click()
+
+    req_image = driver.find_element_by_xpath(
+        '//*[@id="islrg"]/div[1]/div[1]/a[1]/div[1]/img')
+
+    st.image(req_image.get_attribute("src"))
+
+
 dishes_details = []
 i = 0
 for index in rindex:
     templist = []
-    templist.append(rdishes[i])
+    templist.append(rdishes[i][0])  # dishname
+    templist.append(df.iloc[ntop10[i], [0]][0])
+    # Restaurant name
     templist.append(df_rest.iloc[index-1, [0]][0])
-    templist.append(df_rest.iloc[index-1, [1]][0])
-    templist.append(df_rest.iloc[index-1, [2]][0])
-    templist.append(df_rest.iloc[index-1, [3]][0])
+    templist.append(df_rest.iloc[index-1, [1]][0])  # rating
+    templist.append(df_rest.iloc[index-1, [2]][0])  # cuisine
+    templist.append(df_rest.iloc[index-1, [3]][0])  # category
+    # query_string = rdishes[i][0] + df_rest.iloc[index-1, [0]][0]
+    # downloader.download(query_string, limit=1,  output_dir='dataset',
+    # adult_filter_off=True, force_replace=False, timeout=60)
+
     i = i+1
     dishes_details.append(templist)
-st.write(dishes_details)
-print(rrest)
+# st.write(dishes_details)
+# for detail in dishes_details:
+#     print(detail)
+
+
+if(st.button('Show Recommendation')):
+    rows = int((len(dishes_details)+1)/2)
+    columns = st.columns(len(dishes_details))
+    index = 0
+    for row in range(0, rows):
+        col1, col2 = st.columns(2)
+        col1.header(dishes_details[index][0])
+        with col1:
+            st.text("Category: " + dishes_details[index][1])
+            st.text("Restaurant Name: " + dishes_details[index][2])
+            st.text("Rating " + dishes_details[index][3])
+            st.text("Restaurant Type: " + dishes_details[index][4])
+            # show_image(
+            #     str(dishes_details[index][0])+str(dishes_details[index][1]))
+        # st.write("\n")
+        index += 1
+        if(index != len(dishes_details)):
+            col2.header(dishes_details[index][0])
+            with col2:
+                st.text("Category: " + dishes_details[index][1])
+                st.text("Restaurant Name: " + dishes_details[index][2])
+                st.text("Rating " + dishes_details[index][3])
+                st.text("Restaurant Type: " + dishes_details[index][4])
+                # show_image(
+                #     str(dishes_details[index][0])+str(dishes_details[index][1]))
+        index += 1
+        st.write("\n")
